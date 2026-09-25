@@ -417,25 +417,24 @@ def build_mitigation_plan(
         def optimistic_edge_upper_bound(
             covered: int, chosen_mask: int, forbidden_mask: int, budget: int
         ) -> int:
-            """至多可覆盖的来源边总数（合法上界）：剩余 budget 步每步至多新增
-            当时关联未覆盖边最多的可选载频所覆盖的边数；这是标准贪心边际收益
-            上界（每步最优边际收益不小于任何同预算序列中对应步的边际收益）。
+            """至多可覆盖的来源边总数（合法上界）。
+
+            剩余预算内每多选一个载频，新覆盖的边数不超过它当前关联的未覆盖
+            边数（已覆盖集合随选择单调扩大，同一载频稍后的边际收益只会更小），
+            且至多再选 budget 个载频，故“各可选载频当前未覆盖边数中最大的
+            budget 个之和”加上已覆盖边数即合法上界，再以总边数封顶。注意不能
+            用“逐次贪心模拟的新增边数之和”估计：贪心序列本身只是一个可行解，
+            其覆盖总数可能小于本子树的真实最优，会把含更优解的分支误剪掉。
             """
-            sim_covered = covered
-            sim_forbidden = forbidden_mask | chosen_mask
-            for _ in range(budget):
-                best_gain, best_j = 0, -1
-                for j in range(len(vertices)):
-                    if (sim_forbidden >> j) & 1:
-                        continue
-                    gain = (incident[j] & ~sim_covered).bit_count()
-                    if gain > best_gain:
-                        best_gain, best_j = gain, j
-                if best_j < 0:
-                    break
-                sim_forbidden |= 1 << best_j
-                sim_covered |= incident[best_j]
-            return sim_covered.bit_count()
+            unavailable = forbidden_mask | chosen_mask
+            gains = [
+                (incident[j] & ~covered).bit_count()
+                for j in range(len(vertices))
+                if not (unavailable >> j) & 1
+            ]
+            gains.sort(reverse=True)
+            upper = covered.bit_count() + sum(gains[:budget])
+            return min(upper, all_edge_mask.bit_count())
 
         def pick_branch_edge(
             covered: int, chosen_mask: int, forbidden_mask: int

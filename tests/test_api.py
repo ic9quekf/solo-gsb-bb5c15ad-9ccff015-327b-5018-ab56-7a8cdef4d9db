@@ -1302,6 +1302,37 @@ def test_mitigation_plan_uses_persisted_result(client):
     assert first == second
 
 
+def test_mitigation_plan_best_effort_not_mispruned_by_greedy_bound(client):
+    # 回归：尽力方案搜索曾把“逐次贪心新增覆盖边数”当作上界，而贪心序列只是
+    # 一个可行解、其覆盖数可能小于子树真实最优，导致含最优解的分支被误剪。
+    # 12 个违规产物（各落在 1 Hz 宽保护频段上），上限 3 时最优为
+    # [120, 210, 330]（消除 11 个，仅剩 170），而非贪心解 [50, 110, 140]
+    # （只消除 10 个）。
+    analysis_id = _create_and_analyze(
+        client,
+        carriers_hz=[50, 110, 120, 140, 210, 330],
+        scan_start_hz=1,
+        scan_end_hz=700,
+        guard_bands=[
+            {"start_hz": f, "end_hz": f + 1}
+            for f in (10, 30, 70, 160, 170, 190, 280, 370, 520, 540, 550, 610)
+        ],
+        guard_interval_hz=1,
+    )
+    resp = client.get(
+        f"/analyses/{analysis_id}/mitigation-plan", params={"max_disabled": 3}
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "analysis_id": analysis_id,
+        "max_disabled": 3,
+        "feasible": False,
+        "disabled_carriers_hz": [120, 210, 330],
+        "eliminated_product_freqs_hz": [10, 30, 70, 160, 190, 280, 370, 520, 540, 550, 610],
+        "remaining_product_freqs_hz": [170],
+    }
+
+
 def test_health(client):
     assert client.get("/health").json() == {"status": "ok"}
 
