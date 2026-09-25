@@ -1290,6 +1290,41 @@ def test_mitigation_plan_three_disjoint_edges(client):
     assert eight["disabled_carriers_hz"] == [1000, 4700, 12300]
 
 
+def test_mitigation_plan_best_effort_not_pruned_by_greedy_bound(client):
+    # 回归：尽力方案搜索的来源边上界不得使用逐次贪心的新增边数之和——次模覆盖
+    # 下贪心先选共享边多的载频会压低后续步收益，该和可能低于真实最优组合，导致
+    # 全局支配剪枝漏掉更优子树。
+    #
+    # 违规来源边（12 个违规产物各一条来源边）：
+    #   10:(110,210) 30:(120,210) 70:(140,210) 160:(120,140)
+    #   170:(50,110)/(110,140) 190:(50,120) 280:(140,210) 370:(50,210)
+    #   520:(140,330) 540:(120,330) 550:(110,330) 610:(50,330)
+    # 上限 3 无点覆盖；贪心陷阱下 [50,110,140] 只消除 10 个产物，而精确最优
+    # [120,210,330] 消除 11 个（两方案覆盖来源边数相同，靠产物数决胜）。
+    analysis_id = _create_and_analyze(
+        client,
+        carriers_hz=[50, 110, 120, 140, 210, 330],
+        scan_start_hz=1,
+        scan_end_hz=700,
+        guard_bands=[
+            {"start_hz": f, "end_hz": f + 1}
+            for f in (10, 30, 70, 160, 170, 190, 280, 370, 520, 540, 550, 610)
+        ],
+        guard_interval_hz=1,
+    )
+    resp = client.get(
+        f"/analyses/{analysis_id}/mitigation-plan", params={"max_disabled": 3}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["feasible"] is False
+    assert body["disabled_carriers_hz"] == [120, 210, 330]
+    assert body["eliminated_product_freqs_hz"] == [
+        10, 30, 70, 160, 190, 280, 370, 520, 540, 550, 610,
+    ]
+    assert body["remaining_product_freqs_hz"] == [170]
+
+
 def test_mitigation_plan_uses_persisted_result(client):
     # 仅使用已保存结果：同一 analysis_id 重复查询（含不同上限）结果确定可复现
     analysis_id = _create_and_analyze(client)
